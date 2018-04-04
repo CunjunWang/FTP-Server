@@ -3,21 +3,15 @@
 #include <stdio.h>
 #include "dir.h"
 #include "usage.h"
-
 #include <stdlib.h>
 #include <netinet/in.h>
 #include <string.h>
-
 #include <stdarg.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-
 #include <time.h>
 
 #define BACKLOG 10
-
-// Here is an example of how to use the above function. It also shows
-// one how to get the arguments passed on the command line.
 
 void ftpServer(int *connected_client_socket);
 
@@ -25,7 +19,7 @@ int sendMessage(int socket_fd, const char *format, ...);
 
 int sendPath(int socket_fd, char *path, uint32_t offset);
 
-int fileExchange(int peer, FILE *f);
+int fileExchange(int peer, FILE *file);
 
 unsigned long getIPAddress(int connected_socket_fd);
 
@@ -102,6 +96,7 @@ int main(int argc, char **argv) {
         puts("Connection closed.");
         puts("Waiting for a client.");
     }
+
 }
 
 void ftpServer(int *connected_client_socket) {
@@ -136,12 +131,13 @@ void ftpServer(int *connected_client_socket) {
     int data_client_len = sizeof(data_client_socket);
 
     server_message = "220 - Service ready for new user. Client connected to server successfully!\n";
-    write(connected_socket, server_message, strlen(server_message));
+    sendMessage(connected_socket, server_message);
 
     server_message = "220 - Specify your username. This server only takes the username \"cs317\".\n";
-    write(connected_socket, server_message, strlen(server_message));
+    sendMessage(connected_socket, server_message);
 
     ssize_t read_buffer_size;
+
     while ((read_buffer_size = recv(connected_socket, client_message, 2000, 0)) > 0) {
 
         sscanf(client_message, "%s", user_command);
@@ -149,8 +145,10 @@ void ftpServer(int *connected_client_socket) {
         char copy[1024];
         strcpy(copy, client_message);
 
+        // count the number of argument for each command
         int counter = 0;
 
+        // split the user command
         char *pch;
         pch = strtok(copy, " ");
         while (pch != NULL) {
@@ -161,14 +159,14 @@ void ftpServer(int *connected_client_socket) {
 
         // QUIT
         if (!strcasecmp(user_command, "QUIT")) {
-            printf("counter in quit is: %d", counter);
+
             if (counter != 0) {
                 counter = 0;
-                server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                server_message = "501 - Wrong number of argument!\n";
                 sendMessage(connected_socket, server_message);
             } else {
                 counter = 0;
-                server_message = "221 Service closing control connection - User quit. Closing connection.\n";
+                server_message = "221 - User quit. Closing connection.\n";
                 sendMessage(connected_socket, server_message);
                 fflush(stdout);
                 close(data_client);
@@ -178,43 +176,43 @@ void ftpServer(int *connected_client_socket) {
             }
         }
 
-        // If not already logged in
+        // If not already logged in.
         if (already_log_in == 0) {
-
-            // the only accepted command is "USER"
+            // accepted command is "USER".
             if (!strcasecmp(user_command, "USER")) {
                 if (counter != 1) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
-                    // Compare user typed name with "cs317"
                     sscanf(client_message, "%s%s", user_command, parameter);
 
-                    if (!strcasecmp(parameter, "cs317")) {
+                    // Compare user typed name with "cs317".
+                    // "CS317" is not allowed.
+                    if (!strcmp(parameter, "cs317")) {
                         already_log_in = 1;
-                        server_message = "230 User logged in, proceed - Login successful.\n";
+                        server_message = "230 - Login successful.\n";
                         sendMessage(connected_socket, server_message);
-                    } else { // Does not support any other username
-                        server_message = "504 Command not implemented for that parameter - This server only takes the username \"cs317\".\n";
+                    } else { // Does not support any other username.
+                        server_message = "504 - This server only takes the username \"cs317\".\n";
                         sendMessage(connected_socket, server_message);
                     }
                 }
-            } else if (!strcasecmp(user_command, "QUIT")) {
+            } else if (!strcasecmp(user_command, "QUIT")) { // Also accept "QUIT" while not logged in.
                 counter = 0;
                 continue;
             } else {
                 counter = 0;
-                server_message = "530 Not logged in - Please log in before any other action.\n";
+                server_message = "530 - Please log in before any other action.\n";
                 sendMessage(connected_socket, server_message);
             }
-        } else {  // If already logged in
+        } else {  // If already logged in.
             // USER
             if (!strcasecmp(user_command, "USER")) {
                 if (counter != 1) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
@@ -222,11 +220,11 @@ void ftpServer(int *connected_client_socket) {
                     // Compare user typed name with "cs317"
                     sscanf(client_message, "%s%s", user_command, parameter);
 
-                    if (!strcasecmp(parameter, "cs317")) {
-                        server_message = "200 Command okay - Already logged in with \"cs317\", no need to log in again!\n";
+                    if (!strcmp(parameter, "cs317")) {
+                        server_message = "200 - Already logged in with \"cs317\", no need to log in again!\n";
                         sendMessage(connected_socket, server_message);
                     } else {
-                        server_message = "200 Command okay - Can not change from \"cs317\" to other user.\n";
+                        server_message = "200 - Can not change from \"cs317\" to other user.\n";
                         sendMessage(connected_socket, server_message);
                     }
                 }
@@ -236,7 +234,7 @@ void ftpServer(int *connected_client_socket) {
 
                 if (counter != 1) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
@@ -248,19 +246,19 @@ void ftpServer(int *connected_client_socket) {
                     getcwd(cwd, sizeof(cwd));
 
                     if ((strcmp(cwd, start_path) == 0) && strncmp("..", parameter, 2) == 0) {
-                        server_message = "550 No access - failed to change directory. Can not go up further at this point!\n";
+                        server_message = "550 - failed to change directory. Can not go up further at this point!\n";
                         sendMessage(connected_socket, server_message);
                         continue;
                     }
 
                     if (strstr(parameter, "../") != NULL || strncmp("./", parameter, 2) == 0) {
-                        server_message = "550 No access - failed to change directory. Can not go up further at this point!\n";
+                        server_message = "550 - failed to change directory. Can not go up further at this point!\n";
                         sendMessage(connected_socket, server_message);
                         continue;
                     }
 
                     if (chdir(parameter) == -1) {
-                        server_message = "550 No access - failed to change directory.\n";
+                        server_message = "550 - failed to change directory.\n";
                         sendMessage(connected_socket, server_message);
                     } else {
                         server_message = "250 - Directory successfully changed.\n";
@@ -275,7 +273,7 @@ void ftpServer(int *connected_client_socket) {
                 // code to the client.)
                 if (counter != 0) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
@@ -307,35 +305,35 @@ void ftpServer(int *connected_client_socket) {
 
                 if (counter != 1) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
 
                     sscanf(client_message, "%s%s", user_command, parameter);
 
-                    if (!strcasecmp(parameter, "A")) {
+                    if (!strcmp(parameter, "A")) {
                         if (ascii_type == 0) {
                             ascii_type = 1;
-                            server_message = "200 Command okay - Setting TYPE to ASCII.\n";
+                            server_message = "200 - Setting TYPE to ASCII.\n";
                             sendMessage(connected_socket, server_message);
                         } else {
-                            server_message = "200 Command okay - Already in ASCII type.\n";
+                            server_message = "200 - Already in ASCII type.\n";
                             sendMessage(connected_socket, server_message);
                         }
-                    } else if (!strcasecmp(parameter, "I")) {
+                    } else if (!strcmp(parameter, "I")) {
 
                         if (ascii_type == 1) {
                             ascii_type = 0;
-                            server_message = "200 Command okay - Setting TYPE to Image.\n";
+                            server_message = "200 - Setting TYPE to Image.\n";
                             sendMessage(connected_socket, server_message);
                         } else {
-                            server_message = "200 Command okay - Already in Image type.\n";
+                            server_message = "200 - Already in Image type.\n";
                             sendMessage(connected_socket, server_message);
                         }
                     } else {
                         // Does not support any other username
-                        server_message = "504 Command not implemented for that parameter - This server only supports TYPE A and TYPE I.\n";
+                        server_message = "504 - This server only supports TYPE A and TYPE I.\n";
                         sendMessage(connected_socket, server_message);
                     }
                 }
@@ -343,30 +341,54 @@ void ftpServer(int *connected_client_socket) {
                 // MODE - you are only to support Stream mode (3.4.1)
                 if (counter != 1) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
                     sscanf(client_message, "%s%s", user_command, parameter);
 
-                    if (!strcasecmp(parameter, "S")) {
+                    if (!strcmp(parameter, "S")) {
                         if (stream_mode == 0) {
                             stream_mode = 1;
-                            server_message = "200 Command okay - Entering Stream mode.\n";
+                            server_message = "200 - Entering Stream mode.\n";
                             sendMessage(connected_socket, server_message);
                         } else {
-                            server_message = "200 Command okay - Already in Stream mode.\n";
+                            server_message = "200 - Already in Stream mode.\n";
                             sendMessage(connected_socket, server_message);
                         }
                     } else {
-                        server_message = "504 Command not implemented for that parameter - This server only supports MODE S.\n";
+                        server_message = "504 - This server only supports MODE S.\n";
+                        sendMessage(connected_socket, server_message);
+                    }
+                }
+            } else if (!strcasecmp(user_command, "STRU")) {
+                // STRU - you are only to support File structure type (3.1.2, 3.1.2.1)
+                if (counter != 0) {
+                    counter = 0;
+                    server_message = "501 - Wrong number of argument!\n";
+                    sendMessage(connected_socket, server_message);
+                } else {
+                    counter = 0;
+                    sscanf(client_message, "%s%s", user_command, parameter);
+
+                    if (!strcasecmp(parameter, "F")) {
+                        if (file_type == 0) {
+                            file_type = 1;
+                            server_message = "200 - Data Structure set to File Structure.\n";
+                            sendMessage(connected_socket, server_message);
+                        } else {
+                            server_message = "200 - Data Structure is already set to File Structure.\n";
+                            sendMessage(connected_socket, server_message);
+                        }
+                    } else {
+                        server_message = "504 - This server only supports STRU F.\n";
                         sendMessage(connected_socket, server_message);
                     }
                 }
             } else if (!strcasecmp(user_command, "PASV")) { // PASV - (4.1.1)
                 if (counter != 0) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
@@ -384,6 +406,7 @@ void ftpServer(int *connected_client_socket) {
                             passive_server.sin_family = AF_INET;
                             passive_server.sin_addr.s_addr = INADDR_ANY;
                             passive_server.sin_port = htons(passive_port);
+
                         } while (bind(passive_socket_fd, (struct sockaddr *) &passive_server, sizeof(passive_server)) <
                                  0);
 
@@ -405,35 +428,11 @@ void ftpServer(int *connected_client_socket) {
                         sendMessage(connected_socket, "227 - Already in passive mode. Port number: %d\n", passive_port);
                     }
                 }
-            } else if (!strcasecmp(user_command, "STRU")) {
-                // STRU - you are only to support File structure type (3.1.2, 3.1.2.1)
-                if (counter != 0) {
-                    counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
-                    sendMessage(connected_socket, server_message);
-                } else {
-                    counter = 0;
-                    sscanf(client_message, "%s%s", user_command, parameter);
-
-                    if (!strcasecmp(parameter, "F")) {
-                        if (file_type == 0) {
-                            file_type = 1;
-                            server_message = "200 Command okay - Data Structure set to File Structure.\n";
-                            sendMessage(connected_socket, server_message);
-                        } else {
-                            server_message = "200 Command okay - Data Structure is already set to File Structure.\n";
-                            sendMessage(connected_socket, server_message);
-                        }
-                    } else {
-                        server_message = "504 Command not implemented for that parameter - This server only supports STRU F.\n";
-                        sendMessage(connected_socket, server_message);
-                    }
-                }
             } else if (!strcasecmp(user_command, "RETR")) {
                 // RETR - (4.1.3)
-                if (counter != 0) {
+                if (counter != 1) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
@@ -441,7 +440,7 @@ void ftpServer(int *connected_client_socket) {
 
                         if (passive_port > 1024 && passive_port <= 65535 && passive_socket_fd >= 0) {
                             ascii_type = 0;
-                            server_message = "150 File status okay - Opening binary mode data connection.\n";
+                            server_message = "150 - Opening binary mode data connection.\n";
                             sendMessage(connected_socket, server_message);
                             listen(passive_socket_fd, BACKLOG);
                             data_client = accept(passive_socket_fd, (struct sockaddr *) &data_client_socket,
@@ -452,10 +451,10 @@ void ftpServer(int *connected_client_socket) {
                             int st = sendPath(data_client, parameter, 0);
 
                             if (st >= 0) {
-                                server_message = "226 Closing data connection - Transfer complete.\n";
+                                server_message = "226 - Transfer complete.\n";
                                 sendMessage(connected_socket, server_message);
                             } else {
-                                server_message = "451 Requested action aborted: local error in processing - File not found.\n";
+                                server_message = "451 - File not found.\n";
                                 sendMessage(connected_socket, server_message);
                             }
 
@@ -479,7 +478,7 @@ void ftpServer(int *connected_client_socket) {
 
                 if (counter != 0) {
                     counter = 0;
-                    server_message = "501 Syntax error in parameters or arguments - Wrong number of argument!\n";
+                    server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
@@ -513,7 +512,7 @@ void ftpServer(int *connected_client_socket) {
                 }
             } else {
                 // All other command not accepted
-                server_message = "502 Command not implemented - This server only supports: USER, QUIT, CWD, CDUP, TYPE, MODE, STRU, RETR, PASV, NLST.\n";
+                server_message = "502 - This server only supports: USER, QUIT, CWD, CDUP, TYPE, MODE, STRU, RETR, PASV, NLST.\n";
                 sendMessage(connected_socket, server_message);
             }
         }
@@ -548,17 +547,18 @@ int sendMessage(int socket_fd, const char *format, ...) {
 }
 
 int sendPath(int socket_fd, char *path, uint32_t offset) {
-    FILE *f = fopen(path, "rb");
-    if (f) {
-        fseek(f, offset, SEEK_SET);
-        int send_d = fileExchange(socket_fd, f);
+    FILE *file = fopen(path, "rb");
+
+    if (file) {
+        fseek(file, offset, SEEK_SET);
+        int send_d = fileExchange(socket_fd, file);
         if (send_d < 0) {
             return -2;
         }
     } else {
         return -1;
     }
-    int to_return = fclose(f);
+    int to_return = fclose(file);
     if (to_return == 0) {
         return 0;
     } else {
@@ -566,17 +566,19 @@ int sendPath(int socket_fd, char *path, uint32_t offset) {
     }
 }
 
-int fileExchange(int peer, FILE *f) {
+int fileExchange(int peer, FILE *file) {
     char file_buffer[1025];
-    ssize_t n, ret = 0;
-    while ((n = fread(file_buffer, 1, 1024, f)) > 0) {
+    size_t n = 0;
+    int return_code = 0;
+
+    while ((n = fread(file_buffer, 1, 1024, file)) > 0) {
         ssize_t st = send(peer, file_buffer, n, 0);
         if (st < 0) {
-            ret = -1;
+            return_code = -1;
             break;
         } else {
             file_buffer[n] = 0;
         }
     }
-    return (int) ret;
+    return return_code;
 }
