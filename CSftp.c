@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <ifaddrs.h>
 #include <time.h>
 
 #define BACKLOG 10
@@ -21,7 +22,9 @@ int sendPath(int socket_fd, char *path, uint32_t offset);
 
 int fileExchange(int peer, FILE *file);
 
-unsigned long getIPAddress(int connected_socket_fd);
+char *getIPAddress();
+
+char *replace_char(char *str, char find, char replace);
 
 int port_number;
 
@@ -120,11 +123,11 @@ void ftpServer(int *connected_client_socket) {
     char *parameter[16];
 
     char cwd[512];
+    char root_path[512];
 
     int passive_port;
     int passive_socket_fd;
     struct sockaddr_in passive_server;
-    int passive_address_len = sizeof(passive_server);
 
     int data_client;
     struct sockaddr_in data_client_socket;
@@ -137,6 +140,9 @@ void ftpServer(int *connected_client_socket) {
     sendMessage(connected_socket, server_message);
 
     ssize_t read_buffer_size;
+
+    // save the root directory
+    getcwd(root_path, sizeof(root_path));
 
     while ((read_buffer_size = recv(connected_socket, client_message, 2000, 0)) > 0) {
 
@@ -198,12 +204,16 @@ void ftpServer(int *connected_client_socket) {
                         server_message = "504 - This server only takes the username \"cs317\".\n";
                         sendMessage(connected_socket, server_message);
                     }
+
+                    memset(parameter, 0, sizeof(parameter));
                 }
             } else if (!strcasecmp(user_command, "QUIT")) { // Also accept "QUIT" while not logged in.
                 counter = 0;
+                memset(parameter, 0, sizeof(parameter));
                 continue;
             } else {
                 counter = 0;
+                memset(parameter, 0, sizeof(parameter));
                 server_message = "530 - Please log in before any other action.\n";
                 sendMessage(connected_socket, server_message);
             }
@@ -212,6 +222,7 @@ void ftpServer(int *connected_client_socket) {
             if (!strcasecmp(user_command, "USER")) {
                 if (counter != 1) {
                     counter = 0;
+                    memset(parameter, 0, sizeof(parameter));
                     server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
@@ -227,6 +238,7 @@ void ftpServer(int *connected_client_socket) {
                         server_message = "200 - Can not change from \"cs317\" to other user.\n";
                         sendMessage(connected_socket, server_message);
                     }
+                    memset(parameter, 0, sizeof(parameter));
                 }
             } else if (!strcasecmp(user_command, "CWD")) {
                 // CWD - (4.1.1) For security reasons you are not accept any CWD command that starts with ./
@@ -234,37 +246,34 @@ void ftpServer(int *connected_client_socket) {
 
                 if (counter != 1) {
                     counter = 0;
+                    memset(parameter, 0, sizeof(parameter));
                     server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
-
                     sscanf(client_message, "%s%s", user_command, parameter);
 
-                    char start_path[128];
-                    getcwd(start_path, sizeof(start_path));
-                    getcwd(cwd, sizeof(cwd));
-
-                    if ((strcmp(cwd, start_path) == 0) && strncmp("..", parameter, 2) == 0) {
+                    if (strstr(parameter, "../") != NULL || strncmp("./", parameter, 2) == 0 ||
+                        strncmp("..", parameter, 2) == 0) {
                         server_message = "550 - failed to change directory. Can not go up further at this point!\n";
                         sendMessage(connected_socket, server_message);
                         continue;
-                    }
-
-                    if (strstr(parameter, "../") != NULL || strncmp("./", parameter, 2) == 0) {
-                        server_message = "550 - failed to change directory. Can not go up further at this point!\n";
-                        sendMessage(connected_socket, server_message);
-                        continue;
-                    }
-
-                    if (chdir(parameter) == -1) {
-                        server_message = "550 - failed to change directory.\n";
-                        sendMessage(connected_socket, server_message);
                     } else {
-                        server_message = "250 - Directory successfully changed.\n";
-                        sendMessage(connected_socket, server_message);
+                        if (chdir(parameter) == -1) {
+                            server_message = "550 - failed to change directory.\n";
+                            sendMessage(connected_socket, server_message);
+                        } else {
+                            server_message = "250 - Directory successfully changed.\n";
+                            sendMessage(connected_socket, server_message);
+                        }
+                        memset(parameter, 0, sizeof(parameter));
                     }
                 }
+            } else if (!strcasecmp(user_command, "DIR")) {
+                // test command to get current working directory
+                getcwd(cwd, sizeof(cwd));
+                puts(cwd);
+
             } else if (!strcasecmp(user_command, "CDUP")) {
                 // CDUP - (4.1.1) For security reasons do not allow a CDUP command to set the working directory
                 // to be the parent directory of where your ftp server is started from. (hint: use the getcwd
@@ -277,12 +286,9 @@ void ftpServer(int *connected_client_socket) {
                     sendMessage(connected_socket, server_message);
                 } else {
                     counter = 0;
-
-                    char start_path[128];
-                    getcwd(start_path, sizeof(start_path));
                     getcwd(cwd, sizeof(cwd));
 
-                    if (strcmp(cwd, start_path) == 0) {
+                    if (strcmp(cwd, root_path) == 0) {
                         server_message = "550 - failed to change directory. Can not go up further at this point!\n";
                         sendMessage(connected_socket, server_message);
                     } else {
@@ -290,26 +296,23 @@ void ftpServer(int *connected_client_socket) {
                             server_message = "550 - failed to change directory.\n";
                             sendMessage(connected_socket, server_message);
                         } else {
-                            server_message = "200 - Command okay.\n";
+                            server_message = "250 - Directory successfully changed.\n";
                             sendMessage(connected_socket, server_message);
                         }
                     }
+                    memset(parameter, 0, sizeof(parameter));
                 }
-            } else if (!strcasecmp(user_command, "wd")) {
-                // test command to show current working directory
-                getcwd(cwd, sizeof(cwd));
-                puts(cwd);
-
             } else if (!strcasecmp(user_command, "TYPE")) {
                 // TYPE - (4.1.1) you are only to support the Image and ASCII type (3.1.1, 3.1.1.3)
 
                 if (counter != 1) {
                     counter = 0;
+                    memset(parameter, 0, sizeof(parameter));
                     server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
-                    counter = 0;
 
+                    counter = 0;
                     sscanf(client_message, "%s%s", user_command, parameter);
 
                     if (!strcmp(parameter, "A")) {
@@ -336,11 +339,15 @@ void ftpServer(int *connected_client_socket) {
                         server_message = "504 - This server only supports TYPE A and TYPE I.\n";
                         sendMessage(connected_socket, server_message);
                     }
+
+                    memset(parameter, 0, sizeof(parameter));
                 }
             } else if (!strcasecmp(user_command, "MODE")) {
                 // MODE - you are only to support Stream mode (3.4.1)
                 if (counter != 1) {
                     counter = 0;
+                    memset(parameter, 0, sizeof(parameter));
+
                     server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
@@ -360,11 +367,13 @@ void ftpServer(int *connected_client_socket) {
                         server_message = "504 - This server only supports MODE S.\n";
                         sendMessage(connected_socket, server_message);
                     }
+                    memset(parameter, 0, sizeof(parameter));
                 }
             } else if (!strcasecmp(user_command, "STRU")) {
                 // STRU - you are only to support File structure type (3.1.2, 3.1.2.1)
-                if (counter != 0) {
+                if (counter != 1) {
                     counter = 0;
+                    memset(parameter, 0, sizeof(parameter));
                     server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
@@ -384,10 +393,13 @@ void ftpServer(int *connected_client_socket) {
                         server_message = "504 - This server only supports STRU F.\n";
                         sendMessage(connected_socket, server_message);
                     }
+                    memset(parameter, 0, sizeof(parameter));
                 }
             } else if (!strcasecmp(user_command, "PASV")) { // PASV - (4.1.1)
+
                 if (counter != 0) {
                     counter = 0;
+                    memset(parameter, 0, sizeof(parameter));
                     server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
@@ -417,21 +429,23 @@ void ftpServer(int *connected_client_socket) {
                             listen(passive_socket_fd, 1);
                             passive_mode = 1;
 
-                            int address = getIPAddress(connected_socket);
-                            sendMessage(connected_socket, "passive address: %d\n", address);
-                            sendMessage(connected_socket, "227 - Entering passive mode (%d,%d,%d,%d,%d,%d)\n",
-                                        address & 0xff, (address >> 8) & 0xff,
-                                        (address >> 16) & 0xff, (address >> 24) & 0xff,
-                                        (passive_port >> 8) & 0xff, passive_port & 0xff);
+                            char *ip_address = getIPAddress();
+                            char *handled_ip = replace_char(ip_address, '.', ',');
+
+                            sendMessage(connected_socket, "passive address: %s\n", ip_address);
+                            sendMessage(connected_socket, "227 - Entering passive mode (%s,%d,%d), port number %d\n",
+                                        handled_ip, (passive_port >> 8) & 0xff, passive_port & 0xff, passive_port);
                         }
                     } else {
                         sendMessage(connected_socket, "227 - Already in passive mode. Port number: %d\n", passive_port);
                     }
+                    memset(parameter, 0, sizeof(parameter));
                 }
             } else if (!strcasecmp(user_command, "RETR")) {
                 // RETR - (4.1.3)
                 if (counter != 1) {
                     counter = 0;
+                    memset(parameter, 0, sizeof(parameter));
                     server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
@@ -448,15 +462,25 @@ void ftpServer(int *connected_client_socket) {
 
                             sscanf(client_message, "%s%s", user_command, parameter);
 
-                            int st = sendPath(data_client, parameter, 0);
+                            // set timeout = 10s
+                            struct timeval timeInterval;
+                            fd_set readfd;
+                            timeInterval.tv_sec = 10; //wait for connection
+                            timeInterval.tv_usec = 0;
+                            FD_ZERO(&readfd);
+                            FD_SET(data_client, &readfd);
+                            int statue = select(data_client + 1, &readfd, NULL, NULL, &timeInterval);
 
-                            if (st >= 0) {
+                            int send_path = sendPath(data_client, parameter, 0);
+
+                            if (send_path >= 0) {
                                 server_message = "226 - Transfer complete.\n";
                                 sendMessage(connected_socket, server_message);
                             } else {
-                                server_message = "451 - File not found.\n";
+                                server_message = "550 - Failed to open file..\n";
                                 sendMessage(connected_socket, server_message);
                             }
+                            memset(parameter, 0, sizeof(parameter));
 
                             close(data_client);
 
@@ -464,10 +488,12 @@ void ftpServer(int *connected_client_socket) {
                             passive_mode = 0;
 
                         } else {
+                            memset(parameter, 0, sizeof(parameter));
                             server_message = "500 - No passive server created.\n";
                             sendMessage(connected_socket, server_message);
                         }
                     } else {
+                        memset(parameter, 0, sizeof(parameter));
                         server_message = "425 - Use PASV first.\n";
                         sendMessage(connected_socket, server_message);
                     }
@@ -478,6 +504,7 @@ void ftpServer(int *connected_client_socket) {
 
                 if (counter != 0) {
                     counter = 0;
+                    memset(parameter, 0, sizeof(parameter));
                     server_message = "501 - Wrong number of argument!\n";
                     sendMessage(connected_socket, server_message);
                 } else {
@@ -498,19 +525,23 @@ void ftpServer(int *connected_client_socket) {
                             server_message = "226 - Transfer complete.\n";
                             sendMessage(connected_socket, server_message);
 
+                            memset(parameter, 0, sizeof(parameter));
                             close(data_client);
                             close(passive_socket_fd);
                             passive_mode = 0;
                         } else {
+                            memset(parameter, 0, sizeof(parameter));
                             server_message = "500 - Error entering passive mode.\n";
                             sendMessage(connected_socket, server_message);
                         }
                     } else {
+                        memset(parameter, 0, sizeof(parameter));
                         server_message = "425 - Use PASV first.\n";
                         sendMessage(connected_socket, server_message);
                     }
                 }
             } else {
+                memset(parameter, 0, sizeof(parameter));
                 // All other command not accepted
                 server_message = "502 - This server only supports: USER, QUIT, CWD, CDUP, TYPE, MODE, STRU, RETR, PASV, NLST.\n";
                 sendMessage(connected_socket, server_message);
@@ -523,19 +554,33 @@ void ftpServer(int *connected_client_socket) {
     }
 }
 
-unsigned long getIPAddress(int connected_socket_fd) {
-    unsigned long IP_long;
-    struct sockaddr_in connected_socket;
-    socklen_t length = sizeof(connected_socket);
-    if (getsockname(connected_socket_fd, (struct sockaddr *) &connected_socket, &length) < 0) {
-        perror("error!");
-        sendMessage(connected_socket_fd, "225 - Data connection failed.\n");
-        return -1;
-    } else {
-        IP_long = connected_socket.sin_addr.s_addr;
-        return IP_long;
+
+char *getIPAddress() {
+    struct ifaddrs *ifap, *ifa;
+    struct sockaddr_in *sa;
+    char *addr;
+    getifaddrs(&ifap);
+    for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            if (!strcmp(ifa->ifa_name, "en0")) {
+                sa = (struct sockaddr_in *) ifa->ifa_addr;
+                addr = inet_ntoa(sa->sin_addr);
+            }
+        }
     }
+    freeifaddrs(ifap);
+    return addr;
 }
+
+char *replace_char(char *str, char find, char replace) {
+    char *current_pos = strchr(str, find);
+    while (current_pos) {
+        *current_pos = replace;
+        current_pos = strchr(current_pos, find);
+    }
+    return str;
+}
+
 
 int sendMessage(int socket_fd, const char *format, ...) {
     va_list args;
